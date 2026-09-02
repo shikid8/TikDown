@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing
+/coverage
+
+# Next.js build output
+/.next/
+/out/
+
+# Production
+/build
+
+# Misc
+.DS_Store
+*.pem
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local env files
+.env*.local
+.env
+
+# ⚠️ JANGAN COMMIT FILE COOKIES — Berisi data sensitif akun TikTok
+cookies.json
+cookies.txt
+cookies.netscape
+
+# yt-dlp binary (unduh via install-ytdlp.bat)
+yt-dlp.exe
+yt-dlp
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Downloads temp dir
+/public/downloads/
+/tmp/
+
+# Dokumentasi internal (tidak perlu di-push ke GitHub)
+DEPLOY.md
+PROGRESS.md
+PROJECT_DETAIL.md
+cookies.md
+
+setup.bat
+package.json
+package-lock.json
