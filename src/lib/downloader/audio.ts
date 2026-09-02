@@ -14,7 +14,7 @@ if (process.env.FFMPEG_PATH) {
 export function extractAudioStream(videoStream: NodeJS.ReadableStream): PassThrough {
   const audioStream = new PassThrough();
 
-  ffmpeg(videoStream)
+  ffmpeg(videoStream as unknown as import("stream").Readable)
     .toFormat("mp3")
     .audioBitrate("128k")
     .on("error", (err) => {

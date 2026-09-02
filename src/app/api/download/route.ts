@@ -75,7 +75,7 @@ export async function GET(req: NextRequest) {
       headers: {
         "Content-Type": contentType,
         "Content-Disposition": `attachment; filename="${filename}"`,
-        "Content-Length": videoResponse.headers["content-length"] ?? "",
+        "Content-Length": String(videoResponse.headers["content-length"] ?? ""),
         "Accept-Ranges": "bytes",
         "Cache-Control": "no-cache",
       },

@@ -118,7 +118,7 @@ async function scrapeWithStealthBrowser(
     const capturePromise = new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, 8000);
 
-      page.on("response", async (response) => {
+      page.on("response", async (response: import("puppeteer").HTTPResponse) => {
         if (videoData) return;
         const resUrl = response.url();
         const isVideoApi =
