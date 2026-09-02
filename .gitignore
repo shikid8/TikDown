@@ -46,6 +46,9 @@ next-env.d.ts
 /public/downloads/
 /tmp/
 
+# Puppeteer Chrome cache (diinstall ulang saat build)
+.cache/puppeteer/
+
 # Dokumentasi internal (tidak perlu di-push ke GitHub)
 DEPLOY.md
 PROGRESS.md
