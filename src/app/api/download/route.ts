@@ -54,13 +54,20 @@ export async function GET(req: NextRequest) {
       responseType: "stream",
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
-        Referer: "https://www.tiktok.com/",
-        Cookie: cookieHeader,
-        Range: "bytes=0-",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Referer": "https://www.tiktok.com/",
+        "Origin": "https://www.tiktok.com",
+        "Cookie": cookieHeader,
+        "Range": "bytes=0-",
+        "Accept": "video/webm,video/ogg,video/*;q=0.9,application/ogg;q=0.7,audio/*;q=0.6,*/*;q=0.5",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "identity",
+        "sec-fetch-dest": "video",
+        "sec-fetch-mode": "no-cors",
+        "sec-fetch-site": "cross-site",
       },
       timeout: 60000,
-      maxRedirects: 5,
+      maxRedirects: 10,
     });
 
     const contentType = format === "mp3" ? "audio/mpeg" : "video/mp4";
