@@ -18,6 +18,23 @@ import { filterTikTokCookies, validateCookies } from "./cookies";
  * 3. Header string: "name=value; name2=value2"
  */
 export async function loadLocalCookies(): Promise<TikTokCookie[]> {
+  // ── Prioritas 1: Environment variable (untuk server cloud seperti Render) ──
+  const cookiesEnv = process.env.TIKTOK_COOKIES_JSON;
+  if (cookiesEnv) {
+    try {
+      const parsed = JSON.parse(cookiesEnv);
+      const cookies = Array.isArray(parsed) ? parsed : [];
+      const filtered = filterTikTokCookies(cookies);
+      if (filtered.length > 0) {
+        console.info(`[LocalCookies] ✅ ${filtered.length} cookies dimuat dari TIKTOK_COOKIES_JSON env`);
+        return filtered;
+      }
+    } catch (e) {
+      console.warn("[LocalCookies] Gagal parse TIKTOK_COOKIES_JSON:", (e as Error).message);
+    }
+  }
+
+  // ── Prioritas 2: File lokal cookies.json ──
   const cookiesPath = process.env.COOKIES_FILE || "./cookies.json";
   const absolutePath = path.resolve(process.cwd(), cookiesPath);
 
