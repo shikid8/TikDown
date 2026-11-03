@@ -7,6 +7,7 @@
 //
 import type { TikTokCookie } from "@/types/cookie";
 import type { TikTokVideoInfo, DownloadOption } from "@/types/tiktok";
+import { getTimestampFromVideoId } from "@/lib/utils";
 
 export interface ScraperOptions {
   cookies?: TikTokCookie[];
@@ -343,8 +344,14 @@ function parseItem(item: Record<string, unknown>, originalUrl: string): TikTokVi
   const thumbnail = getUrl(video.originCover ?? video.cover ?? video.origin_cover) ||
     getUrl(video.dynamicCover ?? video.dynamic_cover);
 
+  const videoId = String(item.id ?? item.aweme_id ?? "");
+  const createTime =
+    Number(item.createTime ?? item.create_time ?? 0) ||
+    getTimestampFromVideoId(videoId) ||
+    undefined;
+
   return {
-    id: String(item.id ?? item.aweme_id ?? ""),
+    id: videoId,
     url: originalUrl,
     title: String(item.desc ?? "TikTok Video"),
     description: String(item.desc ?? ""),
@@ -357,6 +364,7 @@ function parseItem(item: Record<string, unknown>, originalUrl: string): TikTokVi
     },
     thumbnail,
     duration: Number(video.duration ?? 0),
+    createTime,
     width: Number(video.width ?? 0) || undefined,
     height: Number(video.height ?? 0) || undefined,
     stats: {
@@ -434,7 +442,7 @@ function extractVideoId(url: string): string | null {
   return m?.[1] ?? null;
 }
 
-async function resolveShortUrl(url: string, cookies: TikTokCookie[]): Promise<string> {
+export async function resolveShortUrl(url: string, cookies: TikTokCookie[] = []): Promise<string> {
   if (!url.includes("vm.tiktok.com") && !url.includes("vt.tiktok.com")) return url;
   try {
     const axios = (await import("axios")).default;

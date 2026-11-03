@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Loader2, Search, CheckCircle, XCircle, Clock, AlertCircle, ListPlus } from "lucide-react";
+import { Loader2, Search, CheckCircle, XCircle, Clock, AlertCircle, ListPlus, Calendar, ArrowUpDown } from "lucide-react";
 import { QualitySelector } from "./QualitySelector";
 import type { VideoQuality } from "@/types/tiktok";
-import { cn, formatFileSize } from "@/lib/utils";
+import { cn, formatFileSize, sortUrlsByUploadDate } from "@/lib/utils";
 import { toast } from "sonner";
 
 export type BatchStatus = "idle" | "pending" | "processing" | "success" | "error";
@@ -20,6 +20,8 @@ export interface BatchItem {
     size?: number;
     downloadUrl?: string;
     format?: string;
+    uploadDate?: string;
+    uploadTimestamp?: number;
   };
   downloadTriggered?: boolean;
 }
@@ -27,15 +29,32 @@ export interface BatchItem {
 export function BatchDownload() {
   const [urlsText, setUrlsText] = useState("");
   const [quality, setQuality] = useState<VideoQuality | "audio">("1080p");
+  const [sortOrder, setSortOrder] = useState<"oldest" | "newest" | "original">("oldest");
   const [isProcessing, setIsProcessing] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [items, setItems] = useState<BatchItem[]>([]);
   const [taskId, setTaskId] = useState<string | null>(null);
 
+  const handleSortUrls = (order: "oldest" | "newest") => {
+    const rawUrls = urlsText.split("\n").map((u) => u.trim()).filter(Boolean);
+    if (rawUrls.length === 0) return;
+    const sorted = sortUrlsByUploadDate(rawUrls, order);
+    setUrlsText(sorted.join("\n"));
+    setSortOrder(order);
+    toast.success(
+      order === "oldest"
+        ? "URL diurutkan dari video terlama ke terbaru!"
+        : "URL diurutkan dari video terbaru ke terlama!"
+    );
+  };
+
   const startBatch = async () => {
-    const urls = urlsText.split("\n").map(u => u.trim()).filter(Boolean);
-    if (urls.length === 0) return;
+    const rawUrls = urlsText.split("\n").map(u => u.trim()).filter(Boolean);
+    if (rawUrls.length === 0) return;
+
+    // Urutkan URLs di frontend sebelum mulai sesuai sortOrder
+    const urls = sortUrlsByUploadDate(rawUrls, sortOrder);
 
     const initialItems = urls.map((url, i) => ({
       id: `${i}-${Date.now()}`,
@@ -50,7 +69,7 @@ export function BatchDownload() {
       const res = await fetch("/api/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ urls, quality })
+        body: JSON.stringify({ urls, quality, sortOrder })
       });
       
       if (!res.ok) throw new Error("Failed to start batch");
@@ -77,13 +96,13 @@ export function BatchDownload() {
       const res = await fetch("/api/extract-urls", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: urls[0] })
+        body: JSON.stringify({ url: urls[0], sortOrder })
       });
       
       const data = await res.json();
       if (res.ok && data.success && data.urls) {
         setUrlsText(data.urls.join("\n"));
-        toast.success(`Berhasil mengekstrak ${data.urls.length} video!`);
+        toast.success(`Berhasil mengekstrak ${data.urls.length} video (diurutkan dari terlama ke terbaru)!`);
       } else {
         toast.error(data.error || "Gagal mengekstrak URL");
       }
@@ -228,7 +247,21 @@ export function BatchDownload() {
     <div className="glass-card p-6 space-y-4 animate-slide-up">
       <div className="flex items-center justify-between mb-2">
         <h3 className="font-semibold text-white text-sm">Batch Download</h3>
-        <span className="badge-brand">{urlsCount} URL</span>
+        <div className="flex items-center gap-2">
+          {urlsCount > 1 && (
+            <button
+              type="button"
+              onClick={() => handleSortUrls(sortOrder === "oldest" ? "newest" : "oldest")}
+              disabled={isProcessing}
+              className="text-xs px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 text-brand-300 border border-brand-500/20 flex items-center gap-1.5 transition-all"
+              title="Urutkan daftar URL berdasarkan tanggal upload video"
+            >
+              <ArrowUpDown className="w-3 h-3" />
+              <span>{sortOrder === "oldest" ? "Urutan: Terlama ➔ Terbaru" : "Urutan: Terbaru ➔ Terlama"}</span>
+            </button>
+          )}
+          <span className="badge-brand">{urlsCount} URL</span>
+        </div>
       </div>
       
       <div 
@@ -255,9 +288,10 @@ export function BatchDownload() {
         )}
       </div>
       
-      <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-        <div className="flex items-center gap-2 w-full sm:w-1/2">
-          <span className="text-sm text-slate-400">Kualitas:</span>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+        {/* Kualitas */}
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-slate-400 shrink-0">Kualitas:</span>
           <QualitySelector
             value={quality}
             onChange={setQuality}
@@ -270,9 +304,32 @@ export function BatchDownload() {
           />
         </div>
         
-        <p className="text-xs text-slate-500 text-right w-full sm:w-auto">
-          Satu URL per baris
-        </p>
+        {/* Urutan Download */}
+        <div className="flex items-center gap-2 sm:justify-end">
+          <span className="text-sm text-slate-400 shrink-0 flex items-center gap-1">
+            <Calendar className="w-3.5 h-3.5 text-brand-400" />
+            Urutan:
+          </span>
+          <select
+            value={sortOrder}
+            onChange={(e) => {
+              const val = e.target.value as "oldest" | "newest" | "original";
+              setSortOrder(val);
+              if (val !== "original") {
+                const rawUrls = urlsText.split("\n").map((u) => u.trim()).filter(Boolean);
+                if (rawUrls.length > 1) {
+                  setUrlsText(sortUrlsByUploadDate(rawUrls, val).join("\n"));
+                }
+              }
+            }}
+            disabled={isProcessing}
+            className="input-brand py-1.5 px-3 text-xs bg-slate-900 border-slate-700 rounded-xl max-w-[220px]"
+          >
+            <option value="oldest">📅 Terlama ke Terbaru (Default)</option>
+            <option value="newest">🆕 Terbaru ke Terlama</option>
+            <option value="original">📋 Sesuai Urutan Input</option>
+          </select>
+        </div>
       </div>
 
       {isCollectionUrl ? (
@@ -310,8 +367,14 @@ export function BatchDownload() {
             {items.map((item) => (
               <div key={item.id} className="flex flex-col gap-2 p-3 rounded-lg bg-slate-900/50 border border-slate-800">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="text-xs font-mono text-slate-400 truncate flex-1">
-                    {item.data?.title ? item.data.title : item.url}
+                  <div className="text-xs font-mono text-slate-400 truncate flex-1 flex items-center gap-2">
+                    <span className="truncate">{item.data?.title ? item.data.title : item.url}</span>
+                    {item.data?.uploadDate && (
+                      <span className="shrink-0 px-2 py-0.5 rounded-md bg-brand-500/10 border border-brand-500/20 text-[10px] text-brand-300 font-sans font-medium flex items-center gap-1">
+                        <Calendar className="w-3 h-3 text-brand-400" />
+                        {item.data.uploadDate}
+                      </span>
+                    )}
                   </div>
                   <div className="shrink-0 flex items-center gap-1.5 text-xs">
                     {item.status === "pending" && <><Clock className="w-3.5 h-3.5 text-slate-500"/> <span className="text-slate-500">Menunggu</span></>}

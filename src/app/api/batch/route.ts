@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { tasksStore, scheduleCleanup } from "@/lib/batchStore";
-import { scrapeTikTokVideo } from "@/lib/tiktok/scraper";
+import { scrapeTikTokVideo, resolveShortUrl } from "@/lib/tiktok/scraper";
 import { loadLocalCookies } from "@/lib/tiktok/localCookies";
 import { checkRateLimit, getClientIp } from "@/lib/rateLimit";
+import { sortUrlsByUploadDate, getTimestampFromVideoId, formatUploadDate } from "@/lib/utils";
 import { v4 as uuidv4 } from "uuid";
 import { downloadQueue } from "@/lib/downloader/queue";
 
@@ -20,7 +21,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { urls, quality } = await req.json();
+    const { urls, quality, sortOrder = "oldest" } = await req.json();
 
     if (!urls || !Array.isArray(urls)) {
       return NextResponse.json({ error: "Invalid urls array" }, { status: 400 });
@@ -34,8 +35,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const cookies = await loadLocalCookies();
+
+    // Resolusi short URL (jika ada) dan urutkan berdasarkan tanggal upload (default: terlama ke terbaru)
+    const resolvedUrls = await Promise.all(
+      urls.map((u: string) => resolveShortUrl(u, cookies))
+    );
+    const sortedUrls = sortUrlsByUploadDate(
+      resolvedUrls,
+      sortOrder as "oldest" | "newest" | "original"
+    );
+
     const taskId = uuidv4();
-    const items = urls.map((url: string, index: number) => ({
+    const items = sortedUrls.map((url: string, index: number) => ({
       id: `${index}`,
       url,
       status: "pending" as const,
@@ -48,7 +60,7 @@ export async function POST(req: NextRequest) {
     });
 
     // Start background processing (non-blocking)
-    processBatch(taskId, urls, quality).catch(console.error);
+    processBatch(taskId, sortedUrls, quality).catch(console.error);
 
     return NextResponse.json({ taskId });
   } catch (error) {
@@ -95,6 +107,9 @@ async function processBatch(taskId: string, urls: string[], quality: string) {
           throw new Error("Kualitas yang diminta tidak tersedia");
         }
 
+        const uploadTs = videoInfo.createTime || getTimestampFromVideoId(videoInfo.id);
+        const uploadDate = uploadTs ? formatUploadDate(uploadTs) : undefined;
+
         task.items[index].status = "success";
         task.items[index].progress = 100;
         task.items[index].data = {
@@ -102,6 +117,8 @@ async function processBatch(taskId: string, urls: string[], quality: string) {
           size: targetOption.size,
           downloadUrl: targetOption.url,
           format: quality === "audio" ? "mp3" : "mp4",
+          uploadDate,
+          uploadTimestamp: uploadTs || undefined,
         };
       } catch (error: any) {
         task.items[index].status = "error";

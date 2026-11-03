@@ -43,6 +43,8 @@ export function sanitizeFilename(name: string): string {
 
 /** Extract TikTok video ID from URL */
 export function extractVideoId(url: string): string | null {
+  if (/^\d{15,22}$/.test(url.trim())) return url.trim();
+
   const patterns = [
     /tiktok\.com\/@[\w.]+\/video\/(\d+)/,
     /tiktok\.com\/v\/(\d+)/,
@@ -55,6 +57,68 @@ export function extractVideoId(url: string): string | null {
     if (match?.[1]) return match[1];
   }
   return null;
+}
+
+/**
+ * Extract upload timestamp (in seconds) from TikTok Snowflake video ID or URL.
+ * TikTok video IDs are 64-bit integers where the upper 32 bits represent Unix timestamp in seconds.
+ */
+export function getTimestampFromVideoId(input: string): number | null {
+  const videoId = extractVideoId(input) || input.trim();
+  if (!/^\d{15,22}$/.test(videoId)) return null;
+  try {
+    const ts = Number(BigInt(videoId) >> BigInt(32));
+    // Sanity check: valid Unix timestamp between 2016 and 2038
+    if (ts > 1451606400 && ts < 2147483647) {
+      return ts;
+    }
+  } catch {}
+  return null;
+}
+
+/**
+ * Get Date object from TikTok video ID or URL
+ */
+export function getVideoUploadDate(input: string): Date | null {
+  const ts = getTimestampFromVideoId(input);
+  return ts ? new Date(ts * 1000) : null;
+}
+
+/**
+ * Format timestamp or Date to human-readable date string (e.g. "5 Apr 2024")
+ */
+export function formatUploadDate(val: number | Date): string {
+  const d = typeof val === "number" ? new Date(val > 10000000000 ? val : val * 1000) : val;
+  if (isNaN(d.getTime())) return "-";
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(d);
+}
+
+/**
+ * Sort list of TikTok video URLs based on their upload date.
+ * - "oldest": Terlama ke terbaru (ascending)
+ * - "newest": Terbaru ke terlama (descending)
+ * - "original": Tetap sesuai urutan input
+ */
+export function sortUrlsByUploadDate(
+  urls: string[],
+  order: "oldest" | "newest" | "original" = "oldest"
+): string[] {
+  if (order === "original") return [...urls];
+
+  return [...urls].sort((a, b) => {
+    const tsA = getTimestampFromVideoId(a) ?? (order === "oldest" ? Infinity : -Infinity);
+    const tsB = getTimestampFromVideoId(b) ?? (order === "oldest" ? Infinity : -Infinity);
+
+    if (order === "oldest") {
+      return tsA - tsB;
+    } else {
+      return tsB - tsA;
+    }
+  });
 }
 
 /** Validate TikTok URL */

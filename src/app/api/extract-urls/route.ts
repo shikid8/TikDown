@@ -3,6 +3,7 @@ import { z } from "zod";
 import { scrapeCollectionUrls } from "@/lib/tiktok/collectionScraper";
 import { loadLocalCookies } from "@/lib/tiktok/localCookies";
 import { decryptPayload } from "@/lib/cryptoCookie";
+import { sortUrlsByUploadDate } from "@/lib/utils";
 import type { TikTokCookie } from "@/types/cookie";
 
 const RequestSchema = z.object({
@@ -10,6 +11,7 @@ const RequestSchema = z.object({
     (url) => url.includes("tiktok.com"),
     { message: "URL harus dari tiktok.com" }
   ),
+  sortOrder: z.enum(["oldest", "newest", "original"]).optional().default("oldest"),
 });
 
 export async function POST(req: NextRequest) {
@@ -27,7 +29,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { url } = parsed.data;
+    const { url, sortOrder } = parsed.data;
 
     let cookies: TikTokCookie[] = await loadLocalCookies();
     
@@ -45,10 +47,11 @@ export async function POST(req: NextRequest) {
 
     // Ekstrak dengan timeout 60 detik (default)
     const videoUrls = await scrapeCollectionUrls(url, { cookies, timeout: 60000 });
+    const sortedUrls = sortUrlsByUploadDate(videoUrls, sortOrder);
 
     return NextResponse.json({
       success: true,
-      urls: videoUrls,
+      urls: sortedUrls,
     });
   } catch (error) {
     console.error("[API /extract-urls] Error:", error);

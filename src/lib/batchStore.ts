@@ -19,6 +19,8 @@ export interface BatchTaskItem {
     size?: number;
     downloadUrl?: string;
     format?: string;
+    uploadDate?: string;
+    uploadTimestamp?: number;
   };
 }
 

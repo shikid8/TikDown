@@ -38,6 +38,7 @@ export interface TikTokVideoInfo {
   thumbnail: string;
   coverUrl?: string;
   duration: number; // seconds
+  createTime?: number; // upload timestamp in seconds
   width?: number;
   height?: number;
   stats: TikTokStats;
