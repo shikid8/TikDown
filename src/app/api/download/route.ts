@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { sanitizeFilename } from "@/lib/utils";
 import { loadLocalCookies } from "@/lib/tiktok/localCookies";
+import { decryptPayload } from "@/lib/cryptoCookie";
 import type { TikTokCookie } from "@/types/cookie";
 
 const QuerySchema = z.object({
@@ -35,13 +36,16 @@ export async function GET(req: NextRequest) {
     // ── Prioritas 1: Baca dari file lokal cookies.json ──────────────────────
     let cookies: TikTokCookie[] = await loadLocalCookies();
 
-    // ── Prioritas 2: Fallback ke session cookie browser ─────────────────────
+    // ── Prioritas 2: Fallback ke session cookie browser (terenkripsi) ───────
     if (cookies.length === 0) {
       const sessionCookie = req.cookies.get("tk_session");
       if (sessionCookie?.value) {
         try {
-          cookies = JSON.parse(sessionCookie.value) as TikTokCookie[];
-        } catch {}
+          const decrypted = decryptPayload(sessionCookie.value);
+          cookies = JSON.parse(decrypted) as TikTokCookie[];
+        } catch (e) {
+          console.warn("[API /download] Gagal mendekripsi session cookies:", (e as Error).message);
+        }
       }
     }
 

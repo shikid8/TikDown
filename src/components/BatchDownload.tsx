@@ -95,42 +95,62 @@ export function BatchDownload() {
     }
   };
 
+  // SSE: Ganti polling interval dengan EventSource (Server-Sent Events)
+  // Lebih efisien: server push update hanya saat ada perubahan state.
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    
-    if (taskId && isProcessing) {
-      interval = setInterval(async () => {
-        try {
-          const res = await fetch(`/api/batch?taskId=${taskId}`);
-          if (!res.ok) return;
-          const data = await res.json();
-          
-          if (data.items) {
-            setItems(prevItems => {
-              const newItems = [...data.items];
-              // Persist downloadTriggered state from prevItems
-              return newItems.map(newItem => {
-                const prev = prevItems.find(p => p.id === newItem.id);
-                if (prev && prev.downloadTriggered) {
-                  newItem.downloadTriggered = true;
-                }
-                return newItem;
-              });
-            });
-          }
-          if (data.isComplete) {
-            setIsProcessing(false);
-            setTaskId(null);
-            clearInterval(interval);
-          }
-        } catch (e) {
-          console.error("Polling error", e);
+    if (!taskId || !isProcessing) return;
+
+    const eventSource = new EventSource(`/api/batch/stream?taskId=${taskId}`);
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data as string);
+
+        if (data.error) {
+          console.error("SSE error:", data.error);
+          eventSource.close();
+          setIsProcessing(false);
+          setTaskId(null);
+          return;
         }
-      }, 2000);
-    }
-    
+
+        if (data.items) {
+          setItems((prevItems) => {
+            const newItems = [...data.items] as typeof prevItems;
+            // Pertahankan status downloadTriggered dari state sebelumnya
+            return newItems.map((newItem) => {
+              const prev = prevItems.find((p) => p.id === newItem.id);
+              if (prev?.downloadTriggered) newItem.downloadTriggered = true;
+              return newItem;
+            });
+          });
+        }
+
+        if (data.isComplete) {
+          setIsProcessing(false);
+          setTaskId(null);
+          eventSource.close();
+        }
+      } catch (e) {
+        console.error("SSE parse error:", e);
+      }
+    };
+
+    eventSource.onerror = () => {
+      console.warn("SSE connection closed/error");
+      eventSource.close();
+      // Jika error sebelum selesai, hentikan processing state
+      setIsProcessing((prev) => {
+        if (prev) {
+          toast.error("Koneksi terputus. Silakan cek hasil download secara manual.");
+        }
+        return false;
+      });
+      setTaskId(null);
+    };
+
     return () => {
-      if (interval) clearInterval(interval);
+      eventSource.close();
     };
   }, [taskId, isProcessing]);
 

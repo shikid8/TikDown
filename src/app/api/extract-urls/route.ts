@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { scrapeCollectionUrls } from "@/lib/tiktok/collectionScraper";
 import { loadLocalCookies } from "@/lib/tiktok/localCookies";
+import { decryptPayload } from "@/lib/cryptoCookie";
 import type { TikTokCookie } from "@/types/cookie";
 
 const RequestSchema = z.object({
@@ -34,8 +35,11 @@ export async function POST(req: NextRequest) {
       const sessionCookie = req.cookies.get("tk_session");
       if (sessionCookie?.value) {
         try {
-          cookies = JSON.parse(sessionCookie.value) as TikTokCookie[];
-        } catch {}
+          const decrypted = decryptPayload(sessionCookie.value);
+          cookies = JSON.parse(decrypted) as TikTokCookie[];
+        } catch (e) {
+          console.warn("[API /extract-urls] Gagal mendekripsi session cookies:", (e as Error).message);
+        }
       }
     }
 

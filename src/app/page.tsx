@@ -3,14 +3,17 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Music2, Layers } from "lucide-react";
+import { Music2, Layers, History } from "lucide-react";
 import { DownloadForm } from "@/components/DownloadForm";
 import { VideoPreview } from "@/components/VideoPreview";
+import { DownloadHistory } from "@/components/DownloadHistory";
 import { useDownload } from "@/hooks/useDownload";
+import { useDownloadStore } from "@/store/downloadStore";
 
 export default function HomePage() {
-  const [mode, setMode] = useState<"single" | "batch">("single");
+  const [mode, setMode] = useState<"single" | "batch" | "history">("single");
   const { currentVideo, isFetching, fetchVideoInfo, downloadVideo } = useDownload();
+  const { history } = useDownloadStore();
 
   return (
     <main className="min-h-screen flex flex-col">
@@ -79,87 +82,115 @@ export default function HomePage() {
               <Layers className="w-4 h-4" />
               Batch Download
             </button>
+            <button
+              id="mode-history"
+              onClick={() => setMode("history")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
+                mode === "history"
+                  ? "bg-brand-500 text-white shadow-brand-sm"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <History className="w-4 h-4" />
+              History
+              {history.length > 0 && (
+                <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-brand-700/60 text-[10px] font-bold leading-none">
+                  {history.length}
+                </span>
+              )}
+            </button>
           </div>
         </motion.div>
 
-        {/* Download Form */}
+        {/* Download Form / History */}
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.25, duration: 0.5 }}
         >
-          <DownloadForm
-            mode={mode}
-            isLoading={isFetching}
-            onFetch={fetchVideoInfo}
-          />
+          {mode === "history" ? (
+            <div className="glass-card p-6">
+              <DownloadHistory />
+            </div>
+          ) : (
+            <DownloadForm
+              mode={mode}
+              isLoading={isFetching}
+              onFetch={fetchVideoInfo}
+            />
+          )}
         </motion.div>
 
-        {/* Skeleton Loading */}
-        <AnimatePresence>
-          {isFetching && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20, scale: 0.95 }}
-              className="glass-card p-4 sm:p-6 w-full mx-auto animate-pulse"
-            >
-              <div className="flex flex-col sm:flex-row gap-6">
-                <div className="w-full sm:w-[220px] h-[360px] sm:h-[390px] rounded-xl bg-slate-800/50 shimmer shrink-0" />
-                <div className="flex-1 space-y-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-full bg-slate-800/50 shimmer shrink-0" />
-                    <div className="space-y-2 flex-1">
-                      <div className="h-4 bg-slate-800/50 rounded w-1/3 shimmer" />
-                      <div className="h-3 bg-slate-800/50 rounded w-1/4 shimmer" />
+        {/* Konten Single/Batch: sembunyikan saat mode history */}
+        {mode !== "history" && (
+          <>
+            {/* Skeleton Loading */}
+            <AnimatePresence>
+              {isFetching && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20, scale: 0.95 }}
+                  className="glass-card p-4 sm:p-6 w-full mx-auto animate-pulse"
+                >
+                  <div className="flex flex-col sm:flex-row gap-6">
+                    <div className="w-full sm:w-[220px] h-[360px] sm:h-[390px] rounded-xl bg-slate-800/50 shimmer shrink-0" />
+                    <div className="flex-1 space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-full bg-slate-800/50 shimmer shrink-0" />
+                        <div className="space-y-2 flex-1">
+                          <div className="h-4 bg-slate-800/50 rounded w-1/3 shimmer" />
+                          <div className="h-3 bg-slate-800/50 rounded w-1/4 shimmer" />
+                        </div>
+                      </div>
+                      <div className="space-y-2 pt-2">
+                        <div className="h-3 bg-slate-800/50 rounded w-full shimmer" />
+                        <div className="h-3 bg-slate-800/50 rounded w-5/6 shimmer" />
+                        <div className="h-3 bg-slate-800/50 rounded w-4/6 shimmer" />
+                      </div>
+                      <div className="flex gap-4 pt-4">
+                        <div className="h-8 bg-slate-800/50 rounded w-16 shimmer" />
+                        <div className="h-8 bg-slate-800/50 rounded w-16 shimmer" />
+                        <div className="h-8 bg-slate-800/50 rounded w-16 shimmer" />
+                      </div>
+                      <div className="pt-6 space-y-3 mt-auto">
+                        <div className="h-10 bg-slate-800/50 rounded-xl w-full shimmer" />
+                        <div className="h-12 bg-slate-800/50 rounded-xl w-full shimmer" />
+                      </div>
                     </div>
                   </div>
-                  <div className="space-y-2 pt-2">
-                    <div className="h-3 bg-slate-800/50 rounded w-full shimmer" />
-                    <div className="h-3 bg-slate-800/50 rounded w-5/6 shimmer" />
-                    <div className="h-3 bg-slate-800/50 rounded w-4/6 shimmer" />
-                  </div>
-                  <div className="flex gap-4 pt-4">
-                    <div className="h-8 bg-slate-800/50 rounded w-16 shimmer" />
-                    <div className="h-8 bg-slate-800/50 rounded w-16 shimmer" />
-                    <div className="h-8 bg-slate-800/50 rounded w-16 shimmer" />
-                  </div>
-                  <div className="pt-6 space-y-3 mt-auto">
-                    <div className="h-10 bg-slate-800/50 rounded-xl w-full shimmer" />
-                    <div className="h-12 bg-slate-800/50 rounded-xl w-full shimmer" />
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-        {/* Video Preview */}
-        <AnimatePresence>
-          {currentVideo && !isFetching && (
-            <motion.div
-              key={currentVideo.id}
-              initial={{ opacity: 0, y: 24, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -12, scale: 0.97 }}
-              transition={{ type: "spring", stiffness: 200, damping: 22 }}
-            >
-              <VideoPreview video={currentVideo} onDownload={downloadVideo} />
-            </motion.div>
-          )}
-        </AnimatePresence>
+            {/* Video Preview */}
+            <AnimatePresence>
+              {currentVideo && !isFetching && (
+                <motion.div
+                  key={currentVideo.id}
+                  initial={{ opacity: 0, y: 24, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -12, scale: 0.97 }}
+                  transition={{ type: "spring", stiffness: 200, damping: 22 }}
+                >
+                  <VideoPreview video={currentVideo} onDownload={downloadVideo} />
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-        {/* Empty State */}
-        {!currentVideo && !isFetching && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.4 }}
-            className="text-center py-16 text-slate-600"
-          >
-            <Music2 className="w-12 h-12 mx-auto mb-4 opacity-30" />
-            <p className="text-sm">Masukkan URL TikTok di atas untuk memulai</p>
-          </motion.div>
+            {/* Empty State */}
+            {!currentVideo && !isFetching && mode === "single" && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.4 }}
+                className="text-center py-16 text-slate-600"
+              >
+                <Music2 className="w-12 h-12 mx-auto mb-4 opacity-30" />
+                <p className="text-sm">Masukkan URL TikTok di atas untuk memulai</p>
+              </motion.div>
+            )}
+          </>
         )}
       </section>
 

@@ -23,7 +23,7 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 interface DownloadFormProps {
-  mode: "single" | "batch";
+  mode: "single" | "batch" | "history";
   isLoading: boolean;
   onFetch: (url: string) => Promise<TikTokVideoInfo | null>;
 }

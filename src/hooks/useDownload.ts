@@ -17,6 +17,7 @@ export function useDownload() {
     addTask,
     updateTask,
     setIsLoading,
+    addToHistory,
   } = useDownloadStore();
 
   /**
@@ -91,6 +92,20 @@ export function useDownload() {
 
         updateTask(taskId, { status: "done", progress: 100, completedAt: Date.now() });
         toast.success(`Download dimulai: ${title}`);
+
+        // ── Simpan ke history ──────────────────────────────────────────────
+        if (currentVideo) {
+          addToHistory({
+            id: taskId,
+            taskId,
+            url: videoUrl,
+            videoTitle: currentVideo.title || title,
+            thumbnail: currentVideo.thumbnail || "",
+            quality,
+            format,
+            completedAt: Date.now(),
+          });
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Gagal memulai download.";
         updateTask(taskId, { status: "failed", error: message });
@@ -99,7 +114,7 @@ export function useDownload() {
         setIsDownloading(false);
       }
     },
-    [addTask, updateTask]
+    [addTask, updateTask, addToHistory, currentVideo]
   );
 
   return {

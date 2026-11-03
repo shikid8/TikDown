@@ -1,7 +1,8 @@
-// ─── API: POST /api/cookies ───────────────────────────────────────────────────
+// ─── API: POST/DELETE /api/cookies ───────────────────────────────────────────
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { parseCookies, validateCookies, filterTikTokCookies } from "@/lib/tiktok/cookies";
+import { encryptPayload } from "@/lib/cryptoCookie";
 import type { CookieFormat } from "@/types/cookie";
 
 const RequestSchema = z.object({
@@ -40,10 +41,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Filter TikTok cookies only
+    // Filter & validasi
     const tiktokCookies = filterTikTokCookies(parsedCookies);
-
-    // Validate cookies
     const validation = validateCookies(tiktokCookies);
     if (!validation.isValid) {
       return NextResponse.json(
@@ -54,8 +53,10 @@ export async function POST(req: NextRequest) {
 
     const sessionId = `sess_${Date.now()}`;
 
-    // In production: encrypt and store in a server-side cache/session
-    // For now: return the session ID and let client store in memory
+    // ── Enkripsi payload sebelum disimpan ke cookie ────────────────────────
+    const plaintext = JSON.stringify(tiktokCookies);
+    const encryptedPayload = encryptPayload(plaintext);
+
     const response = NextResponse.json({
       success: true,
       message: validation.message,
@@ -63,13 +64,12 @@ export async function POST(req: NextRequest) {
       cookieCount: tiktokCookies.length,
     });
 
-    // Store cookies in a secure HttpOnly cookie for the session
-    // Note: In production, use encrypted storage
-    response.cookies.set("tk_session", JSON.stringify(tiktokCookies), {
+    // Simpan payload terenkripsi — jauh lebih aman dari plaintext JSON
+    response.cookies.set("tk_session", encryptedPayload, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      maxAge: 60 * 60 * 24 * 7, // 7 days
+      maxAge: 60 * 60 * 24 * 7, // 7 hari
       path: "/",
     });
 

@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { scrapeTikTokVideo } from "@/lib/tiktok/scraper";
 import { loadLocalCookies } from "@/lib/tiktok/localCookies";
+import { decryptPayload } from "@/lib/cryptoCookie";
+import { checkRateLimit, getClientIp } from "@/lib/rateLimit";
 import type { TikTokCookie } from "@/types/cookie";
 
 const RequestSchema = z.object({
@@ -13,6 +15,17 @@ const RequestSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  // ── Rate Limiting ──────────────────────────────────────────────────────────
+  const ip = getClientIp(req);
+  const rl = checkRateLimit(ip); // default: 20 req / jam dari env
+  if (!rl.allowed) {
+    const retryAfterSec = Math.ceil((rl.retryAfterMs ?? 0) / 1000);
+    return NextResponse.json(
+      { success: false, error: `Terlalu banyak request. Coba lagi dalam ${retryAfterSec} detik.` },
+      { status: 429, headers: { "Retry-After": String(retryAfterSec) } }
+    );
+  }
+
   try {
     const body = await req.json();
     const parsed = RequestSchema.safeParse(body);
@@ -33,15 +46,16 @@ export async function POST(req: NextRequest) {
     let cookies: TikTokCookie[] = await loadLocalCookies();
     let cookieSource = "local-file";
 
-    // ── Prioritas 2: Fallback ke session cookie browser (dari UI) ───────────
+    // ── Prioritas 2: Fallback ke session cookie browser (terenkripsi) ───────
     if (cookies.length === 0) {
       const sessionCookie = req.cookies.get("tk_session");
       if (sessionCookie?.value) {
         try {
-          cookies = JSON.parse(sessionCookie.value) as TikTokCookie[];
+          const decrypted = decryptPayload(sessionCookie.value);
+          cookies = JSON.parse(decrypted) as TikTokCookie[];
           cookieSource = "browser-session";
-        } catch {
-          console.warn("[API /fetch-info] Failed to parse session cookies");
+        } catch (e) {
+          console.warn("[API /fetch-info] Gagal mendekripsi session cookies:", (e as Error).message);
         }
       }
     }
@@ -53,7 +67,6 @@ export async function POST(req: NextRequest) {
       console.info(`[API /fetch-info] Menggunakan cookies dari: ${cookieSource} (${cookies.length} cookies)`);
     }
 
-    // Scrape video info
     const videoInfo = await scrapeTikTokVideo(url, { cookies, timeout: 30000 });
 
     return NextResponse.json({

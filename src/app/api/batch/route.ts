@@ -1,14 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { downloadQueue } from "@/lib/downloader/queue";
+import { tasksStore, scheduleCleanup } from "@/lib/batchStore";
 import { scrapeTikTokVideo } from "@/lib/tiktok/scraper";
 import { loadLocalCookies } from "@/lib/tiktok/localCookies";
+import { checkRateLimit, getClientIp } from "@/lib/rateLimit";
 import { v4 as uuidv4 } from "uuid";
-
-// Simple in-memory task store for polling
-// In production with Vercel, you'd want Redis or a database.
-const tasksStore = new Map<string, any>();
+import { downloadQueue } from "@/lib/downloader/queue";
 
 export async function POST(req: NextRequest) {
+  // ── Rate Limiting ──────────────────────────────────────────────────────────
+  const ip = getClientIp(req);
+  // Batch lebih berat: batasi 5 request per jam per IP
+  const rl = checkRateLimit(ip, 5, 60 * 60 * 1000);
+  if (!rl.allowed) {
+    const retryAfterSec = Math.ceil((rl.retryAfterMs ?? 0) / 1000);
+    return NextResponse.json(
+      { error: `Terlalu banyak request. Coba lagi dalam ${retryAfterSec} detik.` },
+      { status: 429, headers: { "Retry-After": String(retryAfterSec) } }
+    );
+  }
+
   try {
     const { urls, quality } = await req.json();
 
@@ -16,11 +26,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid urls array" }, { status: 400 });
     }
 
+    // Batasi jumlah URL per request
+    if (urls.length > 50) {
+      return NextResponse.json(
+        { error: "Maksimal 50 URL per request batch." },
+        { status: 400 }
+      );
+    }
+
     const taskId = uuidv4();
     const items = urls.map((url: string, index: number) => ({
       id: `${index}`,
       url,
-      status: "pending",
+      status: "pending" as const,
     }));
 
     tasksStore.set(taskId, {
@@ -29,7 +47,7 @@ export async function POST(req: NextRequest) {
       items,
     });
 
-    // Start background processing
+    // Start background processing (non-blocking)
     processBatch(taskId, urls, quality).catch(console.error);
 
     return NextResponse.json({ taskId });
@@ -40,7 +58,7 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   const taskId = req.nextUrl.searchParams.get("taskId");
-  
+
   if (!taskId || !tasksStore.has(taskId)) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
@@ -58,19 +76,20 @@ async function processBatch(taskId: string, urls: string[], quality: string) {
 
   const promises = urls.map((url, index) => {
     return downloadQueue.add(`batch-${taskId}-${index}`, async () => {
-      // Update status to processing
       task.items[index].status = "processing";
       task.items[index].progress = 10;
-      
+
       try {
-        // Fetch metadata
         const videoInfo = await scrapeTikTokVideo(url, { cookies, timeout: 30000 });
         task.items[index].progress = 50;
-        
-        // Find the download option
-        const targetOption = quality === "audio" 
-          ? videoInfo.downloadOptions.find(o => o.quality === "audio") || videoInfo.downloadOptions.find(o => !o.hasWatermark)
-          : videoInfo.downloadOptions.find(o => o.quality === quality && !o.hasWatermark) || videoInfo.downloadOptions.find(o => !o.hasWatermark);
+
+        const targetOption =
+          quality === "audio"
+            ? videoInfo.downloadOptions.find((o) => o.quality === "audio") ||
+              videoInfo.downloadOptions.find((o) => !o.hasWatermark)
+            : videoInfo.downloadOptions.find(
+                (o) => o.quality === quality && !o.hasWatermark
+              ) || videoInfo.downloadOptions.find((o) => !o.hasWatermark);
 
         if (!targetOption) {
           throw new Error("Kualitas yang diminta tidak tersedia");
@@ -82,7 +101,7 @@ async function processBatch(taskId: string, urls: string[], quality: string) {
           title: `@${videoInfo.author.username}_${videoInfo.id}`,
           size: targetOption.size,
           downloadUrl: targetOption.url,
-          format: quality === "audio" ? "mp3" : "mp4"
+          format: quality === "audio" ? "mp3" : "mp4",
         };
       } catch (error: any) {
         task.items[index].status = "error";
@@ -91,6 +110,8 @@ async function processBatch(taskId: string, urls: string[], quality: string) {
         completed++;
         if (completed === urls.length) {
           task.isComplete = true;
+          // ── Jadwalkan cleanup task dari store setelah 10 menit ────────────
+          scheduleCleanup(taskId);
         }
       }
     });
