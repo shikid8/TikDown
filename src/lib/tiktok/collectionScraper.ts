@@ -35,6 +35,12 @@ export async function scrapeCollectionUrls(
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 900 });
+
+    // PENTING: User-Agent asli agar TikTok tidak memblok panggilan AJAX API berikutnya
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    );
+
     await page.setExtraHTTPHeaders({
       "Accept-Language": "en-US,en;q=0.9,id;q=0.8",
     });
@@ -54,76 +60,103 @@ export async function scrapeCollectionUrls(
       );
     }
 
-    const capturedUrls = new Set<string>();
+    const usernameMatch = url.match(/@([a-zA-Z0-9_.-]+)/);
+    const targetUsername = usernameMatch ? usernameMatch[1] : "video";
 
-    // ── 1. Intercept Network API TikTok (item_list / feed) ───────────────────
+    const capturedMap = new Map<string, string>(); // videoId -> fullUrl
+
+    // ── 1. Intercept Network API Response (Target Feed TikTok) ────────────────
     page.on("response", async (response: import("puppeteer").HTTPResponse) => {
       const resUrl = response.url();
-      const isItemList =
-        resUrl.includes("/item_list") ||
-        resUrl.includes("aweme/v1/feed") ||
-        resUrl.includes("/api/post/item_list") ||
-        resUrl.includes("/api/collection/item_list");
+      const isTargetFeed =
+        (resUrl.includes("/post/item_list") ||
+          resUrl.includes("/playlist/item_list") ||
+          resUrl.includes("/collection/item_list") ||
+          resUrl.includes("/user/playlist") ||
+          resUrl.includes("/mix/item_list") ||
+          resUrl.includes("aweme/v1/feed")) &&
+        !resUrl.includes("explore");
 
-      if (isItemList && response.status() === 200) {
+      if (isTargetFeed && response.status() === 200) {
         try {
-          const json = await response.json();
-          const list = json?.itemList || json?.items || json?.aweme_list || [];
-          if (Array.isArray(list)) {
-            for (const item of list) {
-              const id = item?.id || item?.aweme_id;
-              const author =
-                item?.author?.uniqueId ||
-                item?.author?.unique_id ||
-                "video";
-              if (id) {
-                capturedUrls.add(`https://www.tiktok.com/@${author}/video/${id}`);
-              }
+          const text = await response.text();
+          // Ekstrak semua video ID dari JSON response
+          const idMatches = text.matchAll(/"(?:id|aweme_id)":"?(\d{18,20})"?/g);
+          for (const m of idMatches) {
+            const vidId = m[1];
+            if (!capturedMap.has(vidId)) {
+              capturedMap.set(
+                vidId,
+                `https://www.tiktok.com/@${targetUsername}/video/${vidId}`
+              );
             }
           }
         } catch {}
       }
     });
 
+    console.info(`[CollectionScraper] Navigating to: ${url}`);
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 35000 });
+    await new Promise((r) => setTimeout(r, 3000));
 
     // Helper untuk mengekstrak URL dari elemen DOM <a>
     const collectFromDOM = async () => {
-      const domUrls = await page.evaluate(() => {
+      const domLinks = await page.evaluate(() => {
         const anchors = Array.from(document.querySelectorAll("a"));
-        const links: string[] = [];
+        const links: { id: string; url: string }[] = [];
         anchors.forEach((a) => {
           const href = a.href;
-          if (href && href.includes("/video/") && href.includes("tiktok.com")) {
-            try {
-              const urlObj = new URL(href);
-              links.push(`${urlObj.origin}${urlObj.pathname}`);
-            } catch {
-              links.push(href.split("?")[0]);
+          if (href && href.includes("/video/")) {
+            const m = href.match(/\/video\/(\d{18,20})/);
+            if (m) {
+              try {
+                const urlObj = new URL(href);
+                links.push({
+                  id: m[1],
+                  url: `${urlObj.origin}${urlObj.pathname}`,
+                });
+              } catch {
+                links.push({ id: m[1], url: href.split("?")[0] });
+              }
             }
           }
         });
         return links;
       });
-      domUrls.forEach((u: string) => capturedUrls.add(u));
+
+      domLinks.forEach((item: { id: string; url: string }) => {
+        if (!capturedMap.has(item.id)) {
+          capturedMap.set(item.id, item.url);
+        }
+      });
     };
 
-    // Ambil batch pertama dari DOM
+    // Ambil data awal dari DOM
     await collectFromDOM();
+    console.info(`[CollectionScraper] Initial captured URLs: ${capturedMap.size}`);
 
-    // ── 2. Scroll Loop dengan Bypass Modal Login & Real Mouse Wheel ──────────
+    // ── 2. Scroll Loop: Bypass Modal & Trigger Infinite Pagination ────────────
     const startTime = Date.now();
-    let consecutiveNoNewData = 0;
-    let lastCount = capturedUrls.size;
+    let consecutiveNoNew = 0;
+    let lastCount = capturedMap.size;
+    const maxScrollRounds = 30; // Mendukung hingga ~300+ video
 
-    while (Date.now() - startTime < timeout && capturedUrls.size < maxUrls) {
-      // Hilangkan / tutup modal login TikTok yang mengunci halaman
+    for (let round = 0; round < maxScrollRounds; round++) {
+      if (capturedMap.size >= maxUrls) {
+        console.info(`[CollectionScraper] Max URLs (${maxUrls}) reached.`);
+        break;
+      }
+
+      if (Date.now() - startTime > timeout) {
+        console.info(`[CollectionScraper] Timeout reached (${timeout}ms).`);
+        break;
+      }
+
+      // Hapus / tutup modal login TikTok yang mengunci overflow
       await page.evaluate(() => {
-        // Unlock scroll body
         document.body.style.overflow = "auto";
         document.documentElement.style.overflow = "auto";
 
-        // Tutup modal jika ada tombol close
         const closeSelectors = [
           '[data-e2e="modal-close-icon"]',
           '[class*="ButtonClose"]',
@@ -134,46 +167,51 @@ export async function scrapeCollectionUrls(
           document.querySelectorAll(sel).forEach((el) => (el as HTMLElement).click());
         });
 
-        // Hapus container modal overlay login jika masih ada
         const modalContainers = document.querySelectorAll(
-          '[id*="login-modal"], div[class*="DivModalContainer"], div[class*="login-modal"], div[aria-modal="true"]'
+          '[id*="login-modal"], div[class*="modal"], div[aria-modal="true"], div[class*="DivModalContainer"]'
         );
         modalContainers.forEach((m) => m.remove());
       });
 
-      // Simulasi pergerakan mouse dan putaran roda (mouse wheel) ke bawah
-      await page.mouse.move(640, 450);
-      await page.mouse.wheel({ deltaY: 1500 });
-
-      // Fallback scroll window ke dasar
+      // Scroll ke paling bawah halaman
       await page.evaluate(() => {
-        window.scrollBy(0, 1500);
+        window.scrollTo(0, document.body.scrollHeight);
       });
 
-      // Beri jeda agar request AJAX TikTok selesai dimuat
-      await new Promise((r) => setTimeout(r, 1500));
+      // Putar mouse wheel untuk memicu event observer TikTok
+      await page.mouse.move(640, 450);
+      await page.mouse.wheel({ deltaY: 2500 });
 
-      // Kumpulkan URL baru dari DOM
+      // Beri waktu bagi AJAX API TikTok untuk mengembalikan batch video baru
+      await new Promise((r) => setTimeout(r, 2600));
+
+      // Kumpulkan dari DOM yang baru di-render
       await collectFromDOM();
 
-      if (capturedUrls.size > lastCount) {
-        lastCount = capturedUrls.size;
-        consecutiveNoNewData = 0;
+      console.info(
+        `[CollectionScraper] Round ${round + 1} - Total Video: ${capturedMap.size}`
+      );
+
+      if (capturedMap.size > lastCount) {
+        lastCount = capturedMap.size;
+        consecutiveNoNew = 0;
       } else {
-        consecutiveNoNewData++;
-        // Coba scroll lebih jauh
-        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-        await new Promise((r) => setTimeout(r, 1000));
+        consecutiveNoNew++;
+        // Coba scroll tambahan jika belum ada hasil
+        await page.mouse.wheel({ deltaY: 3000 });
+        await new Promise((r) => setTimeout(r, 1500));
         await collectFromDOM();
 
-        // Jika 4x percobaan berturut-turut tidak ada URL baru dan tinggi stabil, berarti sudah mencapai akhir
-        if (consecutiveNoNewData >= 4) {
+        if (consecutiveNoNew >= 3) {
+          console.info(
+            `[CollectionScraper] Koleksi selesai atau tidak ada video baru lagi.`
+          );
           break;
         }
       }
     }
 
-    return Array.from(capturedUrls);
+    return Array.from(capturedMap.values());
   } finally {
     await browser.close();
   }

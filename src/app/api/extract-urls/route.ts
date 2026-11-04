@@ -45,8 +45,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Ekstrak dengan timeout 60 detik (default)
-    const videoUrls = await scrapeCollectionUrls(url, { cookies, timeout: 60000 });
+    // Ekstrak dengan timeout 90 detik dan maxUrls 200
+    const videoUrls = await scrapeCollectionUrls(url, { cookies, timeout: 90000, maxUrls: 200 });
     const sortedUrls = sortUrlsByUploadDate(videoUrls, sortOrder);
 
     return NextResponse.json({
