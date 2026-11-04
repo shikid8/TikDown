@@ -219,7 +219,10 @@ async function scrapeWithStealthBrowser(
                   if (item.id || item.desc) videoData = parseItem(item, url);
                 }
               }
-            } catch (e) {
+            } catch (e: any) {
+              if (e?.message && e.message.includes("tidak ditemukan atau telah dihapus")) {
+                throw e;
+              }
               console.warn("Universal data parsing failed:", e);
             }
           }

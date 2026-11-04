@@ -86,16 +86,20 @@ export async function scrapeCollectionUrls(
 
       if (isTargetFeed && response.status() === 200) {
         try {
-          const text = await response.text();
-          // Ekstrak semua video ID dari JSON response
-          const idMatches = text.matchAll(/"(?:id|aweme_id)":"?(\d{18,20})"?/g);
-          for (const m of idMatches) {
-            const vidId = m[1];
-            if (!capturedMap.has(vidId)) {
-              capturedMap.set(
-                vidId,
-                `https://www.tiktok.com/@${targetUsername}/video/${vidId}`
-              );
+          const json = await response.json();
+          const items = json.itemList || json.aweme_list || json.items || [];
+          if (Array.isArray(items)) {
+            for (const item of items) {
+              const vidId = String(item.id || item.aweme_id || "");
+              const authorUsername = item.author?.uniqueId || targetUsername;
+              if (vidId && /^\d{18,20}$/.test(vidId)) {
+                if (!capturedMap.has(vidId)) {
+                  capturedMap.set(
+                    vidId,
+                    `https://www.tiktok.com/@${authorUsername}/video/${vidId}`
+                  );
+                }
+              }
             }
           }
         } catch {}
