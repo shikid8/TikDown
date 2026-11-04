@@ -1,4 +1,5 @@
 import type { TikTokCookie } from "@/types/cookie";
+import { getChromeExecutablePath } from "@/lib/puppeteerConfig";
 
 export interface ExtractUrlsOptions {
   cookies?: TikTokCookie[];
@@ -21,8 +22,14 @@ export async function scrapeCollectionUrls(
     throw new Error("puppeteer-extra tidak tersedia.");
   }
 
+  const executablePath = getChromeExecutablePath();
+  if (executablePath) {
+    console.info(`[CollectionScraper] Menggunakan Chrome sistem: ${executablePath}`);
+  }
+
   const browser = await puppeteerExtra.launch({
     headless: true,
+    ...(executablePath ? { executablePath } : {}),
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",

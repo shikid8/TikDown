@@ -8,6 +8,7 @@
 import type { TikTokCookie } from "@/types/cookie";
 import type { TikTokVideoInfo, DownloadOption } from "@/types/tiktok";
 import { getTimestampFromVideoId } from "@/lib/utils";
+import { getChromeExecutablePath } from "@/lib/puppeteerConfig";
 
 export interface ScraperOptions {
   cookies?: TikTokCookie[];
@@ -77,8 +78,14 @@ async function scrapeWithStealthBrowser(
     console.warn("[Scraper] Stealth plugin tidak tersedia:", (e as Error).message);
   }
 
+  const executablePath = getChromeExecutablePath();
+  if (executablePath) {
+    console.info(`[Scraper] Menggunakan Chrome sistem: ${executablePath}`);
+  }
+
   const browser = await puppeteerExtra.launch({
     headless: true,
+    ...(executablePath ? { executablePath } : {}),
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
