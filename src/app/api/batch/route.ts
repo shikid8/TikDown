@@ -88,6 +88,11 @@ async function processBatch(taskId: string, urls: string[], quality: string) {
 
   const promises = urls.map((url, index) => {
     return downloadQueue.add(`batch-${taskId}-${index}`, async () => {
+      // Stagger request agar tidak menabrak WAF/rate-limit secara bersamaan
+      if (index > 0) {
+        await new Promise((r) => setTimeout(r, Math.min(index * 400, 2500)));
+      }
+
       task.items[index].status = "processing";
       task.items[index].progress = 10;
 

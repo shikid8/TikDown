@@ -57,3 +57,4 @@ export function getChromeExecutablePath(): string | undefined {
   // 5. Default: undefined (Puppeteer menggunakan Chrome bawaan di .cache/puppeteer)
   return undefined;
 }
+

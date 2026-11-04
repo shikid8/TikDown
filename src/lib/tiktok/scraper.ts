@@ -27,23 +27,26 @@ export async function scrapeTikTokVideo(
 
   console.info(`[Scraper] URL: ${resolvedUrl} | VideoID: ${videoId}`);
 
-  // ── STRATEGI UTAMA: Puppeteer Stealth + Cookies ───────────────────────────
+  // ── STRATEGI 1: HTTP API dengan cookies (Super cepat ~400ms, hemat RAM) ──
+  if (videoId) {
+    try {
+      const result = await scrapeViaHttp(resolvedUrl, videoId, cookies, Math.min(timeout, 12000));
+      console.info("[Scraper] ✅ HTTP API berhasil");
+      return result;
+    } catch (e) {
+      console.warn("[Scraper] HTTP API gagal, mencoba stealth browser:", (e as Error).message);
+    }
+  }
+
+  // ── STRATEGI 2: Puppeteer Stealth + Cookies (Fallback jika HTTP API diblokir) ──
   try {
     const result = await scrapeWithStealthBrowser(resolvedUrl, cookies, timeout);
     console.info("[Scraper] ✅ Stealth browser berhasil");
     return result;
-  } catch (e) {
-    console.warn("[Scraper] Stealth browser gagal:", (e as Error).message);
-  }
-
-  // ── FALLBACK: HTTP API dengan cookies (mungkin diblok WAF) ─────────────────
-  if (videoId) {
-    try {
-      const result = await scrapeViaHttp(resolvedUrl, videoId, cookies, timeout);
-      console.info("[Scraper] ✅ HTTP API berhasil");
-      return result;
-    } catch (e) {
-      console.warn("[Scraper] HTTP API gagal:", (e as Error).message);
+  } catch (e: any) {
+    console.warn("[Scraper] Stealth browser gagal:", e?.message);
+    if (e?.message && e.message.includes("tidak ditemukan atau telah dihapus")) {
+      throw e;
     }
   }
 
@@ -137,10 +140,11 @@ async function scrapeWithStealthBrowser(
         if (isVideoApi && response.status() === 200) {
           try {
             const json = await response.json();
-            const item =
-              json?.itemInfo?.itemStruct ??
-              json?.aweme_list?.[0] ??
-              json?.aweme_detail;
+            const currentVideoId = extractVideoId(url);
+            let item = json?.itemInfo?.itemStruct ?? json?.aweme_detail;
+            if (!item && Array.isArray(json?.aweme_list)) {
+              item = json.aweme_list.find((x: any) => !currentVideoId || String(x.aweme_id) === currentVideoId);
+            }
             if (item) {
               videoData = parseItem(item, url);
               clearTimeout(timer);
@@ -161,8 +165,15 @@ async function scrapeWithStealthBrowser(
 
     // Fallback: extract HTML and parse universally
     if (!videoData) {
-      const html = (await page.evaluate(() => document.documentElement.outerHTML)) as string;
+      let html = (await page.evaluate(() => document.documentElement.outerHTML)) as string;
       console.info(`[Scraper] Page HTML length: ${html.length} bytes`);
+
+      // Deteksi SlardarWAF / Pumbaa challenge: tunggu redirect/eksekusi script
+      if (html.includes("slardarClient") || html.includes("Please wait...")) {
+        console.info("[Scraper] SlardarWAF challenge terdeteksi, menunggu verifikasi...");
+        await new Promise((r) => setTimeout(r, 3500));
+        html = (await page.evaluate(() => document.documentElement.outerHTML)) as string;
+      }
 
       if (html.length > 10000) {
         // Universal Parse: application/json
@@ -187,6 +198,15 @@ async function scrapeWithStealthBrowser(
               const parsed = JSON.parse(universalMatches[1]);
               const defaultScope = parsed?.["__DEFAULT_SCOPE__"];
               const webappVideoDetail = defaultScope?.["webapp.video-detail"];
+
+              if (
+                webappVideoDetail?.statusCode === 10204 ||
+                webappVideoDetail?.statusMsg?.toLowerCase().includes("doesn't exist") ||
+                webappVideoDetail?.statusMsg?.toLowerCase().includes("not exist")
+              ) {
+                throw new Error("Video tidak ditemukan atau telah dihapus/diprivat oleh pemiliknya di TikTok.");
+              }
+
               const itemInfo = webappVideoDetail?.itemInfo?.itemStruct;
               if (itemInfo) {
                 videoData = parseItem(itemInfo, url);
@@ -236,7 +256,13 @@ async function scrapeWithStealthBrowser(
 
     return videoData;
   } finally {
-    await browser.close();
+    try {
+      if (browser) {
+        const pages = await browser.pages().catch(() => []);
+        await Promise.all(pages.map((p: any) => p.close().catch(() => {})));
+        await browser.close().catch(() => {});
+      }
+    } catch {}
   }
 }
 
@@ -253,8 +279,9 @@ async function scrapeViaHttp(
   const headers = buildHeaders(cookieHeader);
 
   const endpoints = [
-    `https://www.tiktok.com/api/item/detail/?itemId=${videoId}&aid=1988`,
     `https://api16-normal-c-useast1a.tiktokv.com/aweme/v1/feed/?aweme_id=${videoId}&version_code=262036`,
+    `https://api22-normal-c-useast1a.tiktokv.com/aweme/v1/feed/?aweme_id=${videoId}&version_code=262036`,
+    `https://www.tiktok.com/api/item/detail/?itemId=${videoId}&aid=1988`,
   ];
 
   for (const endpoint of endpoints) {
@@ -270,7 +297,10 @@ async function scrapeViaHttp(
       if (!data || typeof data !== "object" || Buffer.isBuffer(data)) continue;
       if ("0" in data && Object.keys(data).every((k) => !isNaN(Number(k)))) continue;
 
-      const item = data?.itemInfo?.itemStruct ?? data?.aweme_list?.[0] ?? data?.aweme_detail;
+      let item = data?.itemInfo?.itemStruct ?? data?.aweme_detail;
+      if (!item && Array.isArray(data?.aweme_list)) {
+        item = data.aweme_list.find((x: any) => String(x.aweme_id) === videoId);
+      }
       if (item) return parseItem(item, url);
     } catch {}
   }
