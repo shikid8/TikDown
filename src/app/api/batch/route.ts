@@ -27,10 +27,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid urls array" }, { status: 400 });
     }
 
-    // Batasi jumlah URL per request
-    if (urls.length > 50) {
+    // Batasi jumlah URL per request (maksimal 200 URL per batch)
+    if (urls.length > 200) {
       return NextResponse.json(
-        { error: "Maksimal 50 URL per request batch." },
+        { error: "Maksimal 200 URL per request batch." },
         { status: 400 }
       );
     }

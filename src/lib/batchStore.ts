@@ -11,7 +11,7 @@ export interface BatchTask {
 export interface BatchTaskItem {
   id: string;
   url: string;
-  status: "pending" | "processing" | "success" | "error";
+  status: "pending" | "processing" | "success" | "error" | "skipped";
   progress?: number;
   message?: string;
   data?: {

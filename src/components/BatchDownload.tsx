@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Loader2, Search, CheckCircle, XCircle, Clock, AlertCircle, ListPlus, Calendar, ArrowUpDown } from "lucide-react";
+import { Loader2, Search, CheckCircle, XCircle, Clock, AlertCircle, ListPlus, Calendar, ArrowUpDown, SkipForward, Check } from "lucide-react";
 import { QualitySelector } from "./QualitySelector";
 import type { VideoQuality } from "@/types/tiktok";
-import { cn, formatFileSize, sortUrlsByUploadDate } from "@/lib/utils";
+import { cn, formatFileSize, sortUrlsByUploadDate, extractVideoId } from "@/lib/utils";
+import { useDownloadStore } from "@/store/downloadStore";
 import { toast } from "sonner";
 
-export type BatchStatus = "idle" | "pending" | "processing" | "success" | "error";
+export type BatchStatus = "idle" | "pending" | "processing" | "success" | "error" | "skipped";
 
 export interface BatchItem {
   id: string;
@@ -30,11 +31,36 @@ export function BatchDownload() {
   const [urlsText, setUrlsText] = useState("");
   const [quality, setQuality] = useState<VideoQuality | "audio">("1080p");
   const [sortOrder, setSortOrder] = useState<"oldest" | "newest" | "original">("oldest");
+  const [skipDownloaded, setSkipDownloaded] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [items, setItems] = useState<BatchItem[]>([]);
   const [taskId, setTaskId] = useState<string | null>(null);
+
+  const { history } = useDownloadStore();
+
+  // Set ID video yang sudah pernah diunduh berdasarkan history
+  const downloadedVideoIds = new Set(
+    history
+      .map((h) => extractVideoId(h.url) || extractVideoId(h.id) || h.taskId)
+      .filter(Boolean)
+  );
+
+  const isVideoDownloaded = (url: string) => {
+    const id = extractVideoId(url);
+    return id ? downloadedVideoIds.has(id) : false;
+  };
+
+  const allUrls = urlsText.split("\n").map((u) => u.trim()).filter(Boolean);
+  const urlsCount = allUrls.length;
+  const alreadyDownloadedCount = allUrls.filter((u) => isVideoDownloaded(u)).length;
+
+  const handleRemoveDownloaded = () => {
+    const unDownloaded = allUrls.filter((u) => !isVideoDownloaded(u));
+    setUrlsText(unDownloaded.join("\n"));
+    toast.success(`${alreadyDownloadedCount} URL yang sudah pernah diunduh dihapus dari input.`);
+  };
 
   const handleSortUrls = (order: "oldest" | "newest") => {
     const rawUrls = urlsText.split("\n").map((u) => u.trim()).filter(Boolean);
@@ -50,11 +76,28 @@ export function BatchDownload() {
   };
 
   const startBatch = async () => {
-    const rawUrls = urlsText.split("\n").map(u => u.trim()).filter(Boolean);
+    const rawUrls = urlsText.split("\n").map((u) => u.trim()).filter(Boolean);
     if (rawUrls.length === 0) return;
 
+    // Filter jika skipDownloaded aktif
+    let urlsToProcess = rawUrls;
+    if (skipDownloaded) {
+      urlsToProcess = rawUrls.filter((u) => !isVideoDownloaded(u));
+
+      if (urlsToProcess.length === 0) {
+        toast.info("Semua video dalam daftar sudah pernah diunduh sebelumnya!");
+        return;
+      }
+
+      if (alreadyDownloadedCount > 0) {
+        toast.info(
+          `Memproses ${urlsToProcess.length} video baru (${alreadyDownloadedCount} video dilewati karena sudah ada di riwayat)`
+        );
+      }
+    }
+
     // Urutkan URLs di frontend sebelum mulai sesuai sortOrder
-    const urls = sortUrlsByUploadDate(rawUrls, sortOrder);
+    const urls = sortUrlsByUploadDate(urlsToProcess, sortOrder);
 
     const initialItems = urls.map((url, i) => ({
       id: `${i}-${Date.now()}`,
@@ -202,7 +245,6 @@ export function BatchDownload() {
     });
   }, [items]);
 
-  const urlsCount = urlsText.split("\n").map(u => u.trim()).filter(Boolean).length;
   const isCollectionUrl = urlsCount === 1 && (urlsText.includes("/collection/") || urlsText.includes("/playlist/") || (urlsText.includes("@") && !urlsText.includes("/video/")));
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -332,6 +374,39 @@ export function BatchDownload() {
         </div>
       </div>
 
+      {/* Opsi Skip Video yang Pernah Diunduh */}
+      <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between pt-1 border-t border-slate-800/40">
+        <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-slate-300 hover:text-white transition-colors">
+          <input
+            type="checkbox"
+            checked={skipDownloaded}
+            onChange={(e) => setSkipDownloaded(e.target.checked)}
+            disabled={isProcessing}
+            className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-brand-500 focus:ring-brand-500 accent-brand-500"
+          />
+          <span className="flex items-center gap-1.5 font-medium">
+            <SkipForward className="w-3.5 h-3.5 text-brand-400" />
+            Lewati video yang sudah pernah diunduh
+          </span>
+        </label>
+
+        {urlsCount > 0 && alreadyDownloadedCount > 0 && (
+          <div className="flex items-center gap-2 text-[11px] text-slate-400 bg-slate-900/80 px-2.5 py-1 rounded-lg border border-slate-800">
+            <span>
+              <strong className="text-emerald-400">{alreadyDownloadedCount}</strong> dari {urlsCount} video ada di riwayat
+            </span>
+            <button
+              type="button"
+              onClick={handleRemoveDownloaded}
+              disabled={isProcessing}
+              className="text-brand-400 hover:text-brand-300 underline font-medium ml-1"
+            >
+              Hapus dari input
+            </button>
+          </div>
+        )}
+      </div>
+
       {isCollectionUrl ? (
         <button
           className="btn-ghost w-full border border-brand-500/30 text-brand-400 hover:bg-brand-500/10 mt-2"
@@ -348,13 +423,20 @@ export function BatchDownload() {
         <button
           id="batch-download-btn"
           className="btn-brand w-full mt-2"
-          disabled={isProcessing || urlsCount === 0 || isExtracting}
+          disabled={
+            isProcessing ||
+            urlsCount === 0 ||
+            isExtracting ||
+            (skipDownloaded && urlsCount > 0 && alreadyDownloadedCount === urlsCount)
+          }
           onClick={startBatch}
         >
           {isProcessing ? (
             <><Loader2 className="w-4 h-4 animate-spin" /> Memproses...</>
+          ) : skipDownloaded && alreadyDownloadedCount === urlsCount && urlsCount > 0 ? (
+            <><CheckCircle className="w-4 h-4 text-emerald-400" /> Semua {urlsCount} Video Sudah Diunduh</>
           ) : (
-            <><Search className="w-4 h-4" /> Proses Semua {urlsCount > 0 ? `(${urlsCount}) ` : ""}URL</>
+            <><Search className="w-4 h-4" /> Proses {skipDownloaded && alreadyDownloadedCount > 0 ? `${urlsCount - alreadyDownloadedCount} Video Baru (${alreadyDownloadedCount} dilewati)` : `Semua ${urlsCount > 0 ? `(${urlsCount}) ` : ""}URL`}</>
           )}
         </button>
       )}
@@ -375,12 +457,19 @@ export function BatchDownload() {
                         {item.data.uploadDate}
                       </span>
                     )}
+                    {isVideoDownloaded(item.url) && (
+                      <span className="shrink-0 px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-[10px] text-emerald-400 font-sans font-medium flex items-center gap-1">
+                        <Check className="w-3 h-3 text-emerald-400" />
+                        Pernah Diunduh
+                      </span>
+                    )}
                   </div>
                   <div className="shrink-0 flex items-center gap-1.5 text-xs">
                     {item.status === "pending" && <><Clock className="w-3.5 h-3.5 text-slate-500"/> <span className="text-slate-500">Menunggu</span></>}
                     {item.status === "processing" && <><Loader2 className="w-3.5 h-3.5 text-brand-400 animate-spin"/> <span className="text-brand-400">Memproses</span></>}
                     {item.status === "success" && <><CheckCircle className="w-3.5 h-3.5 text-emerald-400"/> <span className="text-emerald-400">Selesai</span></>}
                     {item.status === "error" && <><XCircle className="w-3.5 h-3.5 text-red-400"/> <span className="text-red-400">Gagal</span></>}
+                    {item.status === "skipped" && <><Check className="w-3.5 h-3.5 text-slate-400"/> <span className="text-slate-400">Dilewati</span></>}
                   </div>
                 </div>
                 
